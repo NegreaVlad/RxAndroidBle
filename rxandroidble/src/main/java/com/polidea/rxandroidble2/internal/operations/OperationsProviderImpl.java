@@ -3,6 +3,8 @@ package com.polidea.rxandroidble2.internal.operations;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.os.Build;
+
 import androidx.annotation.RequiresApi;
 
 import com.polidea.rxandroidble2.ClientComponent;
@@ -71,6 +73,12 @@ public class OperationsProviderImpl implements OperationsProvider {
     @RequiresApi(21 /* Build.VERSION_CODES.LOLLIPOP */)
     public MtuRequestOperation provideMtuChangeOperation(int requestedMtu) {
         return new MtuRequestOperation(rxBleGattCallback, bluetoothGatt, timeoutConfiguration, requestedMtu);
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    @Override
+    public PhyUpdateOperation providePhyUpdateOperation(int txPhy, int rxPhy, int phyOptions) {
+        return new PhyUpdateOperation(rxBleGattCallback, bluetoothGatt, timeoutConfiguration, txPhy, rxPhy, phyOptions);
     }
 
     @Override

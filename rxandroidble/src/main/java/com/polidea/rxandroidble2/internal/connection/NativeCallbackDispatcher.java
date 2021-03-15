@@ -5,6 +5,9 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 
 import bleshadow.javax.inject.Inject;
 import com.polidea.rxandroidble2.HiddenBluetoothGattCallback;
@@ -87,6 +90,13 @@ class NativeCallbackDispatcher {
     void notifyNativeReadCallback(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
         if (nativeCallback != null) {
             nativeCallback.onCharacteristicRead(gatt, characteristic, status);
+        }
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    void notifyPhyChangeCallback(BluetoothGatt gatt, int txPhy, int rxPhy, int status) {
+        if (nativeCallback != null) {
+            nativeCallback.onPhyUpdate(gatt, txPhy, rxPhy, status);
         }
     }
 

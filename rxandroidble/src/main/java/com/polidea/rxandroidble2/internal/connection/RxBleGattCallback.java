@@ -4,12 +4,15 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.jakewharton.rxrelay2.Relay;
+import com.polidea.rxandroidble2.ClientComponent;
 import com.polidea.rxandroidble2.ConnectionParameters;
 import com.polidea.rxandroidble2.HiddenBluetoothGattCallback;
-import com.polidea.rxandroidble2.ClientComponent;
 import com.polidea.rxandroidble2.RxBleConnection.RxBleConnectionState;
 import com.polidea.rxandroidble2.RxBleDeviceServices;
 import com.polidea.rxandroidble2.exceptions.BleDisconnectedException;
@@ -22,20 +25,18 @@ import com.polidea.rxandroidble2.internal.util.ByteAssociation;
 import com.polidea.rxandroidble2.internal.util.CharacteristicChangedEvent;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import bleshadow.javax.inject.Inject;
 import bleshadow.javax.inject.Named;
-
 import io.reactivex.Observable;
 import io.reactivex.Scheduler;
 import io.reactivex.functions.Function;
-import java.util.concurrent.TimeUnit;
 
 
 @ConnectionScope
 public class RxBleGattCallback {
 
-    private final Scheduler callbackScheduler;
     final BluetoothGattProvider bluetoothGattProvider;
     final DisconnectionRouter disconnectionRouter;
     final NativeCallbackDispatcher nativeCallbackDispatcher;
@@ -49,26 +50,29 @@ public class RxBleGattCallback {
     final Output<ByteAssociation<BluetoothGattDescriptor>> writeDescriptorOutput = new Output<>();
     final Output<Integer> readRssiOutput = new Output<>();
     final Output<Integer> changedMtuOutput = new Output<>();
+    final Output<Boolean> phyUpdateOutput = new Output<>();
     final Output<ConnectionParameters> updatedConnectionOutput = new Output<>();
+    private final Scheduler callbackScheduler;
     private final Function<BleGattException, Observable<?>> errorMapper = new Function<BleGattException, Observable<?>>() {
         @Override
         public Observable<?> apply(BleGattException bleGattException) {
             return Observable.error(bleGattException);
         }
     };
-
-    @Inject
-    public RxBleGattCallback(@Named(ClientComponent.NamedSchedulers.BLUETOOTH_CALLBACKS) Scheduler callbackScheduler,
-                             BluetoothGattProvider bluetoothGattProvider,
-                             DisconnectionRouter disconnectionRouter,
-                             NativeCallbackDispatcher nativeCallbackDispatcher) {
-        this.callbackScheduler = callbackScheduler;
-        this.bluetoothGattProvider = bluetoothGattProvider;
-        this.disconnectionRouter = disconnectionRouter;
-        this.nativeCallbackDispatcher = nativeCallbackDispatcher;
-    }
-
     private final BluetoothGattCallback bluetoothGattCallback = new BluetoothGattCallback() {
+
+        @RequiresApi(api = Build.VERSION_CODES.O)
+        @Override
+        public void onPhyUpdate(BluetoothGatt gatt, int txPhy, int rxPhy, int status) {
+            LoggerUtil.logCallback("onPhyUpdate", gatt, status);
+            nativeCallbackDispatcher.notifyPhyChangeCallback(gatt, txPhy, rxPhy, status);
+            super.onPhyUpdate(gatt, txPhy, rxPhy, status);
+
+            if (phyUpdateOutput.hasObservers()
+                    && !propagateErrorIfOccurred(phyUpdateOutput, gatt, status, BleGattOperationType.PHY_UPDATE)) {
+                phyUpdateOutput.valueRelay.accept(status == BluetoothGatt.GATT_SUCCESS);
+            }
+        }
 
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
@@ -220,6 +224,17 @@ public class RxBleGattCallback {
         }
     };
 
+    @Inject
+    public RxBleGattCallback(@Named(ClientComponent.NamedSchedulers.BLUETOOTH_CALLBACKS) Scheduler callbackScheduler,
+                             BluetoothGattProvider bluetoothGattProvider,
+                             DisconnectionRouter disconnectionRouter,
+                             NativeCallbackDispatcher nativeCallbackDispatcher) {
+        this.callbackScheduler = callbackScheduler;
+        this.bluetoothGattProvider = bluetoothGattProvider;
+        this.disconnectionRouter = disconnectionRouter;
+        this.nativeCallbackDispatcher = nativeCallbackDispatcher;
+    }
+
     static RxBleConnectionState mapConnectionStateToRxBleConnectionStatus(int newState) {
 
         switch (newState) {
@@ -315,6 +330,10 @@ public class RxBleGattCallback {
         return withDisconnectionHandling(changedMtuOutput).delay(0, TimeUnit.SECONDS, callbackScheduler);
     }
 
+    public Observable<Boolean> getOnPhyUpdate() {
+        return withDisconnectionHandling(phyUpdateOutput).delay(0, TimeUnit.SECONDS, callbackScheduler);
+    }
+
     public Observable<ByteAssociation<UUID>> getOnCharacteristicRead() {
         return withDisconnectionHandling(readCharacteristicOutput).delay(0, TimeUnit.SECONDS, callbackScheduler);
     }
@@ -366,7 +385,7 @@ public class RxBleGattCallback {
      * {@link #setNativeCallback(BluetoothGattCallback)}
      * Since Android 8.0 (API 26) BluetoothGattCallback has some hidden method(s). Setting this {@link HiddenBluetoothGattCallback} will
      * relay calls to those hidden methods.
-     *
+     * <p>
      * On API lower than 26 this method does nothing
      *
      * @param callbackHidden the object to be called

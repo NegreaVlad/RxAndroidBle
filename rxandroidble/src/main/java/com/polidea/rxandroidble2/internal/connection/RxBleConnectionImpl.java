@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.os.DeadObjectException;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
@@ -50,12 +51,12 @@ import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RE
 @ConnectionScope
 public class RxBleConnectionImpl implements RxBleConnection {
 
-    private final ConnectionOperationQueue operationQueue;
     final RxBleGattCallback gattCallback;
     final BluetoothGatt bluetoothGatt;
+    final Scheduler callbackScheduler;
+    private final ConnectionOperationQueue operationQueue;
     private final OperationsProvider operationsProvider;
     private final Provider<LongWriteOperationBuilder> longWriteOperationBuilderProvider;
-    final Scheduler callbackScheduler;
     private final ServiceDiscoveryManager serviceDiscoveryManager;
     private final NotificationAndIndicationManager notificationIndicationManager;
     private final MtuProvider mtuProvider;
@@ -121,6 +122,30 @@ public class RxBleConnectionImpl implements RxBleConnection {
     @RequiresApi(21 /* Build.VERSION_CODES.LOLLIPOP */)
     public Single<Integer> requestMtu(int mtu) {
         return operationQueue.queue(operationsProvider.provideMtuChangeOperation(mtu)).firstOrError();
+    }
+
+    @Override
+    @RequiresApi(26 /* Build.VERSION_CODES.LOLLIPOP */)
+    /**
+     * Set the preferred connection PHY for this app. Please note that this is just a
+     * recommendation, whether the PHY change will happen depends on other applications preferences,
+     * local and remote controller capabilities. Controller can override these settings.
+     * <p>
+     * {@link BluetoothGattCallback#onPhyUpdate} will be triggered as a result of this call, even
+     * if no PHY change happens. It is also triggered when remote device updates the PHY.
+     *
+     * @param txPhy preferred transmitter PHY. Bitwise OR of any of {@link
+     * BluetoothDevice#PHY_LE_1M_MASK}, {@link BluetoothDevice#PHY_LE_2M_MASK}, and {@link
+     * BluetoothDevice#PHY_LE_CODED_MASK}.
+     * @param rxPhy preferred receiver PHY. Bitwise OR of any of {@link
+     * BluetoothDevice#PHY_LE_1M_MASK}, {@link BluetoothDevice#PHY_LE_2M_MASK}, and {@link
+     * BluetoothDevice#PHY_LE_CODED_MASK}.
+     * @param phyOptions preferred coding to use when transmitting on the LE Coded PHY. Can be one
+     * of {@link BluetoothDevice#PHY_OPTION_NO_PREFERRED}, {@link BluetoothDevice#PHY_OPTION_S2} or
+     * {@link BluetoothDevice#PHY_OPTION_S8}
+     */
+    public Single<Boolean> requestPhyUpdate(int txPhy, int rxPhy, int phyOptions) {
+        return operationQueue.queue(operationsProvider.providePhyUpdateOperation(txPhy, rxPhy, phyOptions)).firstOrError();
     }
 
     @Override

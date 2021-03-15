@@ -3,6 +3,7 @@ package com.polidea.rxandroidble2;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+
 import androidx.annotation.IntDef;
 import androidx.annotation.IntRange;
 import androidx.annotation.NonNull;
@@ -62,182 +63,12 @@ public interface RxBleConnection {
     int GATT_MTU_MAXIMUM = 517;
 
     /**
-     * Description of correct values of connection priority
-     */
-    @Retention(RetentionPolicy.SOURCE)
-    @RequiresApi(21 /* Build.VERSION_CODES.LOLLIPOP */)
-    @IntDef({BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER,
-            BluetoothGatt.CONNECTION_PRIORITY_BALANCED,
-            BluetoothGatt.CONNECTION_PRIORITY_HIGH})
-    @interface ConnectionPriority { }
-
-    @Deprecated
-    interface Connector {
-
-        Single<RxBleConnection> prepareConnection(boolean autoConnect);
-    }
-
-    enum RxBleConnectionState {
-        CONNECTING("CONNECTING"), CONNECTED("CONNECTED"), DISCONNECTED("DISCONNECTED"), DISCONNECTING("DISCONNECTING");
-
-        private final String description;
-
-        RxBleConnectionState(String description) {
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return "RxBleConnectionState{" + description + '}';
-        }
-    }
-
-    /**
-     * The interface of a {@link CharacteristicLongWriteOperation} builder.
-     */
-    interface LongWriteOperationBuilder {
-
-        /**
-         * Setter for a byte array to write
-         * This function MUST be called prior to {@link #build()}
-         *
-         * @param bytes the bytes to write
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setBytes(@NonNull byte[] bytes);
-
-        /**
-         * Setter for a {@link UUID} of the {@link BluetoothGattCharacteristic} to write to
-         * This function or {@link #setCharacteristic(BluetoothGattCharacteristic)} MUST be called prior to {@link #build()}
-         *
-         * @param uuid the UUID
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setCharacteristicUuid(@NonNull UUID uuid);
-
-        /**
-         * Setter for a {@link BluetoothGattCharacteristic} to write to
-         * This function or {@link #setCharacteristicUuid(UUID)} MUST be called prior to {@link #build()}
-         *
-         * @param bluetoothGattCharacteristic the BluetoothGattCharacteristic
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setCharacteristic(@NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic);
-
-        /**
-         * Setter for a maximum size of a byte array that may be write at once
-         * If this is not specified - the default value of the connection's MTU is used
-         *
-         * @param maxBatchSize the maximum size of a byte array to write at once
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setMaxBatchSize(@IntRange(from = 1, to = GATT_MTU_MAXIMUM - GATT_WRITE_MTU_OVERHEAD) int maxBatchSize);
-
-        /**
-         * Setter for a retry strategy in case something goes wrong when writing data. If any {@link BleException} is raised,
-         * a {@link WriteOperationRetryStrategy.LongWriteFailure} object is emitted.
-         * {@link WriteOperationRetryStrategy.LongWriteFailure} contains both the {@link BleException} and the batch number
-         * for which the write request failed. The {@link WriteOperationRetryStrategy.LongWriteFailure} emitted by the
-         * writeOperationRetryStrategy will be used to retry the specified batch number write request.
-         * <br>
-         * If this is not specified - if batch write fails, the long write operation is stopped and whole operation is interrupted.
-         * <br>
-         * It is expected that the Observable returned from the writeOperationRetryStrategy will emit exactly the same events as the source,
-         * however you may delay them at your pace.
-         *
-         * @param writeOperationRetryStrategy the retry strategy
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setWriteOperationRetryStrategy(@NonNull WriteOperationRetryStrategy writeOperationRetryStrategy);
-
-        /**
-         * Setter for a strategy used to mark batch write completed. Only after previous batch has finished, the next (if any left) can be
-         * written.
-         * If this is not specified - the next batch of bytes is written right after the previous one has finished.
-         *
-         * A bytes batch is a part (slice) of the original byte array to write. Imagine a byte array of {0, 1, 2, 3, 4} where the maximum
-         * number of bytes that may be transmitted at once is 2. Then the original byte array will be transmitted in three batches:
-         * {0, 1}, {2, 3}, {4}
-         *
-         * It is expected that the Observable returned from the writeOperationAckStrategy will emit exactly the same events as the source,
-         * however you may delay them at your pace.
-         *
-         * @param writeOperationAckStrategy the function that acknowledges writing of the batch of bytes. It takes
-         *                                  an {@link Observable} that emits a boolean value each time the byte array batch
-         *                                  has finished to write. {@link Boolean#TRUE} means that there are more items in the buffer,
-         *                                  {@link Boolean#FALSE} otherwise. If you want to delay the next batch use provided observable
-         *                                  and add some custom behavior (delay, waiting for a message from the device, etc.)
-         * @return the LongWriteOperationBuilder
-         */
-        LongWriteOperationBuilder setWriteOperationAckStrategy(@NonNull WriteOperationAckStrategy writeOperationAckStrategy);
-
-        /**
-         * Build function for the long write
-         *
-         * @return the Observable which will enqueue the long write operation when subscribed.
-         */
-        Observable<byte[]> build();
-    }
-
-    /**
-     * Retry strategy allows retrying a long write operation. There are two supported scenarios:
-     * - Once the failure happens you may re-emit the failure you've received, applying your own transformations like a delay or any other,
-     * aiming to postpone the retry procedure.
-     * - If that Observable calls {@code onComplete} or {@code onError} then {@code retry} will call
-     * {@code onCompleted} or {@code onError} on the child subscription. The emission will be forwarded as an operation result.
-     *
-     * For general documentation related to retrying please refer to http://reactivex.io/documentation/operators/retry.html
-     */
-    interface WriteOperationRetryStrategy extends ObservableTransformer<WriteOperationRetryStrategy.LongWriteFailure,
-            WriteOperationRetryStrategy.LongWriteFailure> {
-
-        class LongWriteFailure {
-
-            final int batchIndex;
-            final BleGattException cause;
-
-            /**
-             * Default constructor
-             *
-             * @param batchIndex the zero-based batch index on which the write request failed
-             * @param cause       the failed cause of the write request
-             */
-            public LongWriteFailure(int batchIndex, BleGattException cause) {
-                this.batchIndex = batchIndex;
-                this.cause = cause;
-            }
-
-            /**
-             * Get the batch index of the failed write request
-             *
-             * @return the zero-based batch index
-             */
-            public int getBatchIndex() {
-                return batchIndex;
-            }
-
-            /**
-             * Get the failed cause of the write request
-             *
-             * @return a {@link BleGattException}
-             */
-            public BleGattException getCause() {
-                return cause;
-            }
-        }
-    }
-
-    interface WriteOperationAckStrategy extends ObservableTransformer<Boolean, Boolean> {
-
-    }
-
-    /**
      * Performs GATT service discovery and emits discovered results. After service discovery you can walk through
      * {@link android.bluetooth.BluetoothGattService}s and {@link BluetoothGattCharacteristic}s.
      * <p>
      * Result of the discovery is cached internally so consecutive calls won't trigger BLE operation and can be
      * considered relatively lightweight.
-     *
+     * <p>
      * Uses default timeout of 20 seconds
      *
      * @return Observable emitting result a GATT service discovery.
@@ -253,10 +84,10 @@ public interface RxBleConnection {
      * <p>
      * Result of the discovery is cached internally so consecutive calls won't trigger BLE operation and can be
      * considered relatively lightweight.
-     *
+     * <p>
      * Timeouts after specified amount of time.
      *
-     * @param timeout multiplier of TimeUnit after which the discovery will timeout in case of no return values
+     * @param timeout  multiplier of TimeUnit after which the discovery will timeout in case of no return values
      * @param timeUnit TimeUnit for the timeout
      * @return Observable emitting result a GATT service discovery.
      * @throws BleGattCannotStartException with {@link BleGattOperationType#SERVICE_DISCOVERY} type, when it wasn't possible to start
@@ -281,17 +112,17 @@ public interface RxBleConnection {
      * characteristic and the lifecycle of the notification will be shared among them.
      * <p>
      * Notification is automatically unregistered once this observable is unsubscribed.
-     *
+     * <p>
      * NOTE: due to stateful nature of characteristics if one will setupIndication() before setupNotification()
      * the notification will not be set up and will emit an BleCharacteristicNotificationOfOtherTypeAlreadySetException
      *
      * @param characteristicUuid Characteristic UUID for notification setup.
-     * @param setupMode Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
+     * @param setupMode          Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
      * @return Observable emitting another observable when the notification setup is complete.
      * @throws BleCharacteristicNotFoundException              if characteristic with given UUID hasn't been found.
      * @throws BleCannotSetCharacteristicNotificationException if setup process notification setup process fail. This may be an internal
      *                                                         reason or lack of permissions.
-     * @throws BleConflictingNotificationAlreadySetException if indication is already setup for this characteristic
+     * @throws BleConflictingNotificationAlreadySetException   if indication is already setup for this characteristic
      */
     Observable<Observable<byte[]>> setupNotification(@NonNull UUID characteristicUuid, @NonNull NotificationSetupMode setupMode);
 
@@ -309,11 +140,11 @@ public interface RxBleConnection {
      * {@link RxBleConnection#discoverServices()}
      *
      * @param characteristic Characteristic for notification setup.
-     * @param setupMode Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
+     * @param setupMode      Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
      * @return Observable emitting another observable when the notification setup is complete.
      * @throws BleCannotSetCharacteristicNotificationException if setup process notification setup process fail. This may be an internal
      *                                                         reason or lack of permissions.
-     * @throws BleConflictingNotificationAlreadySetException if indication is already setup for this characteristic
+     * @throws BleConflictingNotificationAlreadySetException   if indication is already setup for this characteristic
      */
     Observable<Observable<byte[]>> setupNotification(@NonNull BluetoothGattCharacteristic characteristic,
                                                      @NonNull NotificationSetupMode setupMode);
@@ -339,12 +170,12 @@ public interface RxBleConnection {
      * the indication will not be set up and will emit an BleCharacteristicNotificationOfOtherTypeAlreadySetException
      *
      * @param characteristicUuid Characteristic UUID for indication setup.
-     * @param setupMode Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
+     * @param setupMode          Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
      * @return Observable emitting another observable when the indication setup is complete.
      * @throws BleCharacteristicNotFoundException              if characteristic with given UUID hasn't been found.
      * @throws BleCannotSetCharacteristicNotificationException if setup process indication setup process fail. This may be an internal
      *                                                         reason or lack of permissions.
-     * @throws BleConflictingNotificationAlreadySetException if notification is already setup for this characteristic
+     * @throws BleConflictingNotificationAlreadySetException   if notification is already setup for this characteristic
      */
     Observable<Observable<byte[]>> setupIndication(@NonNull UUID characteristicUuid, @NonNull NotificationSetupMode setupMode);
 
@@ -362,11 +193,11 @@ public interface RxBleConnection {
      * {@link RxBleConnection#discoverServices()}
      *
      * @param characteristic Characteristic for indication setup.
-     * @param setupMode Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
+     * @param setupMode      Configures how the notification is set up. For available modes see {@link NotificationSetupMode}.
      * @return Observable emitting another observable when the indication setup is complete.
      * @throws BleCannotSetCharacteristicNotificationException if setup process indication setup process fail. This may be an internal
      *                                                         reason or lack of permissions.
-     * @throws BleConflictingNotificationAlreadySetException if notification is already setup for this characteristic
+     * @throws BleConflictingNotificationAlreadySetException   if notification is already setup for this characteristic
      */
     Observable<Observable<byte[]>> setupIndication(@NonNull BluetoothGattCharacteristic characteristic,
                                                    @NonNull NotificationSetupMode setupMode);
@@ -402,8 +233,8 @@ public interface RxBleConnection {
      *
      * @param characteristic Requested characteristic.
      * @return Observable emitting characteristic value or an error in case of failure.
-     * @throws BleGattCannotStartException        if read operation couldn't be started for internal reason.
-     * @throws BleGattException                   if read operation failed
+     * @throws BleGattCannotStartException if read operation couldn't be started for internal reason.
+     * @throws BleGattException            if read operation failed
      * @see #getCharacteristic(UUID) to obtain the characteristic.
      * @see #discoverServices() to obtain the characteristic.
      */
@@ -424,7 +255,7 @@ public interface RxBleConnection {
      * Performs GATT write operation on a given characteristic.
      *
      * @param bluetoothGattCharacteristic Characteristic to write.
-     * @param data the byte array to write
+     * @param data                        the byte array to write
      * @return Observable emitting written data or an error in case of failure.
      * @throws BleGattCannotStartException if write operation couldn't be started for internal reason.
      * @throws BleGattException            if write operation failed
@@ -445,9 +276,9 @@ public interface RxBleConnection {
     /**
      * Performs GATT read operation on a descriptor from a characteristic with a given UUID from a service with a given UUID.
      *
-     * @param serviceUuid Requested {@link android.bluetooth.BluetoothGattService} UUID
+     * @param serviceUuid        Requested {@link android.bluetooth.BluetoothGattService} UUID
      * @param characteristicUuid Requested {@link android.bluetooth.BluetoothGattCharacteristic} UUID
-     * @param descriptorUuid Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
+     * @param descriptorUuid     Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
      * @return Observable emitting the descriptor value after read or an error in case of failure.
      * @throws BleGattCannotStartException if read operation couldn't be started for internal reason.
      * @throws BleGattException            if read operation failed
@@ -471,15 +302,15 @@ public interface RxBleConnection {
     /**
      * Performs GATT write operation on a descriptor from a characteristic with a given UUID from a service with a given UUID.
      *
-     * @param serviceUuid Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
+     * @param serviceUuid        Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
      * @param characteristicUuid Requested {@link android.bluetooth.BluetoothGattCharacteristic} UUID
-     * @param descriptorUuid Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
+     * @param descriptorUuid     Requested {@link android.bluetooth.BluetoothGattDescriptor} UUID
      * @return Completable which completes after a successful write operation or an error in case of failure.
      * @throws BleGattCannotStartException if write operation couldn't be started for internal reason.
      * @throws BleGattException            if write operation failed
      */
     Completable writeDescriptor(@NonNull UUID serviceUuid, @NonNull UUID characteristicUuid,
-                                       @NonNull UUID descriptorUuid, @NonNull byte[] data);
+                                @NonNull UUID descriptorUuid, @NonNull byte[] data);
 
     /**
      * Performs GATT write operation on a given descriptor.
@@ -557,7 +388,7 @@ public interface RxBleConnection {
 
     /**
      * Performs GATT MTU (Maximum Transfer Unit) request.
-     *
+     * <p>
      * Timeouts after 10 seconds.
      *
      * @return Observable emitting result the MTU requested.
@@ -567,6 +398,27 @@ public interface RxBleConnection {
      */
     @RequiresApi(21 /* Build.VERSION_CODES.LOLLIPOP */)
     Single<Integer> requestMtu(@IntRange(from = GATT_MTU_MINIMUM, to = GATT_MTU_MAXIMUM) int mtu);
+
+    @RequiresApi(26 /* Build.VERSION_CODES.LOLLIPOP */)
+    /**
+     * Set the preferred connection PHY for this app. Please note that this is just a
+     * recommendation, whether the PHY change will happen depends on other applications preferences,
+     * local and remote controller capabilities. Controller can override these settings.
+     * <p>
+     * {@link BluetoothGattCallback#onPhyUpdate} will be triggered as a result of this call, even
+     * if no PHY change happens. It is also triggered when remote device updates the PHY.
+     *
+     * @param txPhy preferred transmitter PHY. Bitwise OR of any of {@link
+     * BluetoothDevice#PHY_LE_1M_MASK}, {@link BluetoothDevice#PHY_LE_2M_MASK}, and {@link
+     * BluetoothDevice#PHY_LE_CODED_MASK}.
+     * @param rxPhy preferred receiver PHY. Bitwise OR of any of {@link
+     * BluetoothDevice#PHY_LE_1M_MASK}, {@link BluetoothDevice#PHY_LE_2M_MASK}, and {@link
+     * BluetoothDevice#PHY_LE_CODED_MASK}.
+     * @param phyOptions preferred coding to use when transmitting on the LE Coded PHY. Can be one
+     * of {@link BluetoothDevice#PHY_OPTION_NO_PREFERRED}, {@link BluetoothDevice#PHY_OPTION_S2} or
+     * {@link BluetoothDevice#PHY_OPTION_S8}
+     */
+    Single<Boolean> requestPhyUpdate(int txPhy, int rxPhy, int phyOptions);
 
     /**
      * Get currently negotiated MTU value. On pre-lollipop Android versions it will always return 23.
@@ -629,5 +481,176 @@ public interface RxBleConnection {
      * @return Observable emitting the value after execution or an error in case of failure.
      */
     <T> Observable<T> queue(@NonNull RxBleCustomOperation<T> operation, Priority priority);
+
+    enum RxBleConnectionState {
+        CONNECTING("CONNECTING"), CONNECTED("CONNECTED"), DISCONNECTED("DISCONNECTED"), DISCONNECTING("DISCONNECTING");
+
+        private final String description;
+
+        RxBleConnectionState(String description) {
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return "RxBleConnectionState{" + description + '}';
+        }
+    }
+
+    /**
+     * Description of correct values of connection priority
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @RequiresApi(21 /* Build.VERSION_CODES.LOLLIPOP */)
+    @IntDef({BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER,
+            BluetoothGatt.CONNECTION_PRIORITY_BALANCED,
+            BluetoothGatt.CONNECTION_PRIORITY_HIGH})
+    @interface ConnectionPriority {
+    }
+
+    @Deprecated
+    interface Connector {
+
+        Single<RxBleConnection> prepareConnection(boolean autoConnect);
+    }
+
+    /**
+     * The interface of a {@link CharacteristicLongWriteOperation} builder.
+     */
+    interface LongWriteOperationBuilder {
+
+        /**
+         * Setter for a byte array to write
+         * This function MUST be called prior to {@link #build()}
+         *
+         * @param bytes the bytes to write
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setBytes(@NonNull byte[] bytes);
+
+        /**
+         * Setter for a {@link UUID} of the {@link BluetoothGattCharacteristic} to write to
+         * This function or {@link #setCharacteristic(BluetoothGattCharacteristic)} MUST be called prior to {@link #build()}
+         *
+         * @param uuid the UUID
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setCharacteristicUuid(@NonNull UUID uuid);
+
+        /**
+         * Setter for a {@link BluetoothGattCharacteristic} to write to
+         * This function or {@link #setCharacteristicUuid(UUID)} MUST be called prior to {@link #build()}
+         *
+         * @param bluetoothGattCharacteristic the BluetoothGattCharacteristic
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setCharacteristic(@NonNull BluetoothGattCharacteristic bluetoothGattCharacteristic);
+
+        /**
+         * Setter for a maximum size of a byte array that may be write at once
+         * If this is not specified - the default value of the connection's MTU is used
+         *
+         * @param maxBatchSize the maximum size of a byte array to write at once
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setMaxBatchSize(@IntRange(from = 1, to = GATT_MTU_MAXIMUM - GATT_WRITE_MTU_OVERHEAD) int maxBatchSize);
+
+        /**
+         * Setter for a retry strategy in case something goes wrong when writing data. If any {@link BleException} is raised,
+         * a {@link WriteOperationRetryStrategy.LongWriteFailure} object is emitted.
+         * {@link WriteOperationRetryStrategy.LongWriteFailure} contains both the {@link BleException} and the batch number
+         * for which the write request failed. The {@link WriteOperationRetryStrategy.LongWriteFailure} emitted by the
+         * writeOperationRetryStrategy will be used to retry the specified batch number write request.
+         * <br>
+         * If this is not specified - if batch write fails, the long write operation is stopped and whole operation is interrupted.
+         * <br>
+         * It is expected that the Observable returned from the writeOperationRetryStrategy will emit exactly the same events as the source,
+         * however you may delay them at your pace.
+         *
+         * @param writeOperationRetryStrategy the retry strategy
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setWriteOperationRetryStrategy(@NonNull WriteOperationRetryStrategy writeOperationRetryStrategy);
+
+        /**
+         * Setter for a strategy used to mark batch write completed. Only after previous batch has finished, the next (if any left) can be
+         * written.
+         * If this is not specified - the next batch of bytes is written right after the previous one has finished.
+         * <p>
+         * A bytes batch is a part (slice) of the original byte array to write. Imagine a byte array of {0, 1, 2, 3, 4} where the maximum
+         * number of bytes that may be transmitted at once is 2. Then the original byte array will be transmitted in three batches:
+         * {0, 1}, {2, 3}, {4}
+         * <p>
+         * It is expected that the Observable returned from the writeOperationAckStrategy will emit exactly the same events as the source,
+         * however you may delay them at your pace.
+         *
+         * @param writeOperationAckStrategy the function that acknowledges writing of the batch of bytes. It takes
+         *                                  an {@link Observable} that emits a boolean value each time the byte array batch
+         *                                  has finished to write. {@link Boolean#TRUE} means that there are more items in the buffer,
+         *                                  {@link Boolean#FALSE} otherwise. If you want to delay the next batch use provided observable
+         *                                  and add some custom behavior (delay, waiting for a message from the device, etc.)
+         * @return the LongWriteOperationBuilder
+         */
+        LongWriteOperationBuilder setWriteOperationAckStrategy(@NonNull WriteOperationAckStrategy writeOperationAckStrategy);
+
+        /**
+         * Build function for the long write
+         *
+         * @return the Observable which will enqueue the long write operation when subscribed.
+         */
+        Observable<byte[]> build();
+    }
+
+    /**
+     * Retry strategy allows retrying a long write operation. There are two supported scenarios:
+     * - Once the failure happens you may re-emit the failure you've received, applying your own transformations like a delay or any other,
+     * aiming to postpone the retry procedure.
+     * - If that Observable calls {@code onComplete} or {@code onError} then {@code retry} will call
+     * {@code onCompleted} or {@code onError} on the child subscription. The emission will be forwarded as an operation result.
+     * <p>
+     * For general documentation related to retrying please refer to http://reactivex.io/documentation/operators/retry.html
+     */
+    interface WriteOperationRetryStrategy extends ObservableTransformer<WriteOperationRetryStrategy.LongWriteFailure,
+            WriteOperationRetryStrategy.LongWriteFailure> {
+
+        class LongWriteFailure {
+
+            final int batchIndex;
+            final BleGattException cause;
+
+            /**
+             * Default constructor
+             *
+             * @param batchIndex the zero-based batch index on which the write request failed
+             * @param cause      the failed cause of the write request
+             */
+            public LongWriteFailure(int batchIndex, BleGattException cause) {
+                this.batchIndex = batchIndex;
+                this.cause = cause;
+            }
+
+            /**
+             * Get the batch index of the failed write request
+             *
+             * @return the zero-based batch index
+             */
+            public int getBatchIndex() {
+                return batchIndex;
+            }
+
+            /**
+             * Get the failed cause of the write request
+             *
+             * @return a {@link BleGattException}
+             */
+            public BleGattException getCause() {
+                return cause;
+            }
+        }
+    }
+
+    interface WriteOperationAckStrategy extends ObservableTransformer<Boolean, Boolean> {
+
+    }
 
 }
