@@ -87,6 +87,11 @@ public class RxBleConnectionMock implements RxBleConnection {
     }
 
     @Override
+    public Single<Boolean> requestPhyUpdate(int txPhy, int rxPhy, int phyOptions) {
+        return Single.just(true);
+    }
+
+    @Override
     public int getMtu() {
         return currentMtu;
     }
